@@ -35,22 +35,27 @@ same backend can be deployed to AWS later without a rewrite.
 
 ## Running locally
 
-Two processes, both required:
+Two processes, both required. Each has a run script that creates the
+venv/installs dependencies on first run and just starts the server on
+later runs — safe to re-run any time, and it doesn't matter what directory
+you launch it from.
 
+**macOS/Linux:**
 ```bash
-# Backend (http://localhost:8000)
-cd backend
-python3 -m venv venv        # first time only
-./venv/bin/pip install -r requirements.txt   # first time only
-./venv/bin/uvicorn app.main:app --reload --port 8000
+./backend/run.sh      # backend on http://localhost:8000
+./frontend/run.sh      # frontend on http://localhost:5173 (new terminal tab)
 ```
 
-```bash
-# Frontend (http://localhost:5173)
-cd frontend
-npm install                 # first time only
-npm run dev
+**Windows (PowerShell):**
+```powershell
+.\backend\run.ps1
+.\frontend\run.ps1
 ```
+
+Pass a port to either script to override the default, e.g. `./backend/run.sh 8001`
+or `.\backend\run.ps1 -Port 8001`. If you change the backend's port, update
+the proxy target in `frontend/vite.config.js` to match (it defaults to
+`http://localhost:8000`).
 
 Open `http://localhost:5173`. The Vite dev server proxies `/api/*` to the
 backend on port 8000.
