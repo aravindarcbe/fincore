@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import models
 from .database import engine
-from .routers import loans, salary, pf, insurance, creditcards, files, dashboard
+from .routers import loans, salary, pf, insurance, creditcards, files, dashboard, extract
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -24,6 +24,7 @@ app.include_router(insurance.router)
 app.include_router(creditcards.router)
 app.include_router(files.router)
 app.include_router(dashboard.router)
+app.include_router(extract.router)
 
 
 @app.get("/api/health")

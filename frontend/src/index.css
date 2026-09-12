@@ -310,6 +310,15 @@ textarea {
   margin-top: 18px;
 }
 
+.warning-banner {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
 .error-text {
   color: var(--danger);
   font-size: 13px;

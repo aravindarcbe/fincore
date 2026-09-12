@@ -12,7 +12,8 @@ same backend can be deployed to AWS later without a rewrite.
 
 - **Backend:** Python + FastAPI, SQLAlchemy over SQLite (`backend/data/fincore.db`)
 - **Frontend:** React + Vite (plain CSS, no UI framework)
-- **File uploads:** loan/salary/PF/insurance documents stored under `backend/data/uploads/` and linked to their record (reference only — not parsed automatically)
+- **File uploads:** loan/salary/insurance documents stored under `backend/data/uploads/` and linked to their record
+- **PDF auto-fill:** uploading a PDF loan document, insurance policy, or payslip while adding a record pre-fills the form from whatever fields it can find in the text, and flags a likely-duplicate existing record — see "PDF auto-fill" below for how it works and its limits
 
 ## What it tracks
 
@@ -59,11 +60,30 @@ Data lives in `backend/data/fincore.db` (SQLite) and `backend/data/uploads/`
 (attached documents) — both gitignored, so they persist locally but aren't
 committed.
 
+## PDF auto-fill
+
+Adding a loan, insurance policy, or salary revision has an optional "Auto-fill
+from PDF" upload. It extracts the text layer from the PDF (`pypdf`) and looks
+for known field labels (e.g. "Loan Amount", "Rate of Interest", "Policy Start
+Date", "Gross Salary") to pre-fill the form — you always review and correct
+before saving, and the same file is attached to the record either way.
+
+This is plain text-pattern matching, not AI/OCR:
+- Only works on PDFs with a real text layer — a scanned/photographed document
+  (image-only PDF) has no extractable text and won't fill anything in.
+- Only finds a field if the document phrases it in a way the patterns
+  recognise — every bank/insurer formats these documents differently, so
+  expect partial fills, not a guarantee.
+- It also checks for a likely-duplicate existing record (matching amount +
+  date for loans, policy number for insurance, effective month for salary)
+  and warns you instead of silently letting you create a repeat entry.
+- Salary payslips that mention PF contributions surface a note suggesting
+  you update the Provident Fund page — it doesn't update PF automatically,
+  since a payslip's per-month contribution isn't the same as PF's account
+  balance data.
+
 ## Notes on scope (v1)
 
-- No OCR/AI document parsing — you attach a file for your own reference and
-  enter the numbers yourself. Everything derivable from those numbers (balance
-  principal, due dates, pending months, PF projection) is computed for you.
 - No bank/insurer/PF API integration — credit card outstanding and PF
   passbook balances are entered manually whenever you check your statement.
 - Single-user, no authentication — it's a local personal tool for now.

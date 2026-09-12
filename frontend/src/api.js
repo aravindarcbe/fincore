@@ -78,4 +78,10 @@ export const api = {
   },
 
   fileUrl: (storedName) => `${BASE}/files/${storedName}`,
+
+  extract: {
+    loan: (file) => form('POST', '/extract/loan', {}, file),
+    insurance: (file) => form('POST', '/extract/insurance', {}, file),
+    salary: (file) => form('POST', '/extract/salary', {}, file),
+  },
 }

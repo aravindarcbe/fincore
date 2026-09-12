@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { money, dateStr } from '../format.js'
 import Modal from '../components/Modal.jsx'
+import AutoFillUpload from '../components/AutoFillUpload.jsx'
 
 const LOAN_TYPES = ['personal', 'home', 'car', 'education', 'gold', 'other']
 
@@ -214,6 +215,26 @@ function LoanFormModal({ loan, onClose, onSaved }) {
     <Modal title={isNew ? 'Add loan' : 'Edit loan'} onClose={onClose}>
       <form onSubmit={handleSubmit}>
         <div className="form-grid">
+          {isNew && (
+            <AutoFillUpload
+              extractFn={api.extract.loan}
+              onFileSelected={setFile}
+              onExtracted={(extracted) =>
+                setForm((f) => ({
+                  ...f,
+                  lender: f.lender || extracted.lender || f.lender,
+                  principal_amount: f.principal_amount || extracted.principal_amount || f.principal_amount,
+                  interest_rate: f.interest_rate || extracted.interest_rate || f.interest_rate,
+                  tenure_months: f.tenure_months || extracted.tenure_months || f.tenure_months,
+                  emi_amount: f.emi_amount || extracted.emi_amount || f.emi_amount,
+                  start_date: f.start_date || extracted.start_date || f.start_date,
+                }))
+              }
+              renderDuplicate={(d) =>
+                `"${d.name}" (${d.lender || 'no lender listed'}, ${money(d.principal_amount)}, started ${dateStr(d.start_date)})`
+              }
+            />
+          )}
           <div className="full">
             <label>Loan name *</label>
             <input required value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Personal Loan - HDFC" />
@@ -256,12 +277,6 @@ function LoanFormModal({ loan, onClose, onSaved }) {
             <label>Notes</label>
             <textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
           </div>
-          {isNew && (
-            <div className="full">
-              <label>Attach repayment schedule / loan document (optional)</label>
-              <input type="file" onChange={(e) => setFile(e.target.files[0] || null)} />
-            </div>
-          )}
           {!isNew && (
             <div className="full">
               <label>
