@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { money, dateStr } from '../format.js'
 import Modal from '../components/Modal.jsx'
+import AutoFillUpload from '../components/AutoFillUpload.jsx'
 
 const TYPES = ['health', 'term', 'life', 'other']
 const FREQUENCIES = ['monthly', 'quarterly', 'half-yearly', 'yearly']
@@ -197,6 +198,28 @@ function PolicyFormModal({ policy, onClose, onSaved }) {
     <Modal title={isNew ? 'Add insurance policy' : 'Edit policy'} onClose={onClose}>
       <form onSubmit={handleSubmit}>
         <div className="form-grid">
+          {isNew && (
+            <AutoFillUpload
+              extractFn={api.extract.insurance}
+              onFileSelected={setFile}
+              onExtracted={(extracted) =>
+                setForm((f) => ({
+                  ...f,
+                  policy_name: f.policy_name || extracted.policy_name || f.policy_name,
+                  policy_type: extracted.policy_type || f.policy_type,
+                  insurer: f.insurer || extracted.insurer || f.insurer,
+                  policy_number: f.policy_number || extracted.policy_number || f.policy_number,
+                  sum_assured: f.sum_assured || extracted.sum_assured || f.sum_assured,
+                  premium_amount: f.premium_amount || extracted.premium_amount || f.premium_amount,
+                  premium_frequency: extracted.premium_frequency || f.premium_frequency,
+                  start_date: f.start_date || extracted.start_date || f.start_date,
+                  term_years: f.term_years || extracted.term_years || f.term_years,
+                  maturity_benefit: f.maturity_benefit || extracted.maturity_benefit || f.maturity_benefit,
+                }))
+              }
+              renderDuplicate={(d) => `"${d.policy_name}" (${d.insurer || 'no insurer listed'}${d.policy_number ? `, #${d.policy_number}` : ''})`}
+            />
+          )}
           <div className="full">
             <label>Policy name *</label>
             <input required value={form.policy_name} onChange={(e) => set('policy_name', e.target.value)} />
@@ -257,12 +280,6 @@ function PolicyFormModal({ policy, onClose, onSaved }) {
             <label>Notes</label>
             <textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
           </div>
-          {isNew && (
-            <div className="full">
-              <label>Attach policy document (optional)</label>
-              <input type="file" onChange={(e) => setFile(e.target.files[0] || null)} />
-            </div>
-          )}
         </div>
         {error && <div className="error-text">{error}</div>}
         <div className="form-actions">

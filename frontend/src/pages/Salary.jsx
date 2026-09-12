@@ -3,6 +3,7 @@ import { api } from '../api.js'
 import { money, dateStr } from '../format.js'
 import Modal from '../components/Modal.jsx'
 import StatCard from '../components/StatCard.jsx'
+import AutoFillUpload from '../components/AutoFillUpload.jsx'
 
 const emptyForm = { effective_date: '', gross_amount: '', net_amount: '', notes: '' }
 
@@ -108,6 +109,7 @@ function SalaryFormModal({ onClose, onSaved }) {
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [detectedPf, setDetectedPf] = useState(null)
 
   function set(field, value) {
     setForm((f) => ({ ...f, [field]: value }))
@@ -138,6 +140,31 @@ function SalaryFormModal({ onClose, onSaved }) {
     <Modal title="Add salary revision" onClose={onClose}>
       <form onSubmit={handleSubmit}>
         <div className="form-grid">
+          <AutoFillUpload
+            extractFn={api.extract.salary}
+            onFileSelected={setFile}
+            onExtracted={(extracted) => {
+              setForm((f) => ({
+                ...f,
+                effective_date: f.effective_date || extracted.effective_date || f.effective_date,
+                gross_amount: f.gross_amount || extracted.gross_amount || f.gross_amount,
+                net_amount: f.net_amount || extracted.net_amount || f.net_amount,
+              }))
+              if (extracted.employee_pf_contribution || extracted.employer_pf_contribution) {
+                setDetectedPf({
+                  employee: extracted.employee_pf_contribution,
+                  employer: extracted.employer_pf_contribution,
+                })
+              }
+            }}
+            renderDuplicate={(d) => `a salary entry effective ${dateStr(d.effective_date)} (${money(d.gross_amount)})`}
+          />
+          {detectedPf && (
+            <div className="full warning-banner" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+              This payslip also shows PF contributions: employee {money(detectedPf.employee)}, employer{' '}
+              {money(detectedPf.employer)}. Update these on the Provident Fund page if they've changed.
+            </div>
+          )}
           <div>
             <label>Effective from *</label>
             <input required type="date" value={form.effective_date} onChange={(e) => set('effective_date', e.target.value)} />
@@ -153,10 +180,6 @@ function SalaryFormModal({ onClose, onSaved }) {
           <div className="full">
             <label>Notes (e.g. "annual hike letter")</label>
             <textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
-          </div>
-          <div className="full">
-            <label>Attach payslip / hike letter (optional)</label>
-            <input type="file" onChange={(e) => setFile(e.target.files[0] || null)} />
           </div>
         </div>
         {error && <div className="error-text">{error}</div>}
