@@ -21,6 +21,7 @@ export default function Loans() {
   const [loans, setLoans] = useState(null)
   const [error, setError] = useState('')
   const [editing, setEditing] = useState(null) // null = closed, {} = new, {...loan} = edit
+  const [showClosed, setShowClosed] = useState(false)
 
   const load = () => api.loans.list().then(setLoans).catch((e) => setError(e.message))
 
@@ -42,6 +43,9 @@ export default function Loans() {
   if (error) return <div className="error-text">{error}</div>
   if (!loans) return <div className="loading-text">Loading loans…</div>
 
+  const closedCount = loans.filter((l) => l.status === 'closed').length
+  const visibleLoans = showClosed ? loans : loans.filter((l) => l.status !== 'closed')
+
   return (
     <>
       <div className="page-header">
@@ -51,9 +55,25 @@ export default function Loans() {
         </button>
       </div>
 
+      {closedCount > 0 && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            style={{ width: 'auto' }}
+            checked={showClosed}
+            onChange={(e) => setShowClosed(e.target.checked)}
+          />
+          Show closed loans ({closedCount})
+        </label>
+      )}
+
       <div className="panel">
-        {loans.length === 0 ? (
-          <div className="empty-state">No loans yet. Add your first personal loan above.</div>
+        {visibleLoans.length === 0 ? (
+          <div className="empty-state">
+            {loans.length === 0
+              ? 'No loans yet. Add your first personal loan above.'
+              : 'No active loans — all your loans are closed.'}
+          </div>
         ) : (
           <table>
             <thead>
@@ -73,7 +93,7 @@ export default function Loans() {
               </tr>
             </thead>
             <tbody>
-              {loans.map((l) => (
+              {visibleLoans.map((l) => (
                 <tr key={l.id}>
                   <td>
                     <strong>{l.name}</strong>
