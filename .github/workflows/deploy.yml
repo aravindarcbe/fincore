@@ -26,6 +26,11 @@ permissions:
 
 jobs:
   deploy:
+    # Skips cleanly (instead of failing) until the AWS bootstrap in
+    # infra/terraform/README.md is done and DEPLOY_ROLE_ARN is set as a
+    # repo variable - so merging infra changes doesn't immediately produce
+    # a broken/red "Deploy to production" run on main.
+    if: vars.DEPLOY_ROLE_ARN != ''
     runs-on: ubuntu-latest
     environment: production
     steps:

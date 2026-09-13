@@ -35,7 +35,11 @@ env:
 
 jobs:
   plan:
-    if: github.event_name == 'pull_request'
+    # Skips cleanly (instead of failing) until the one-time AWS bootstrap in
+    # infra/terraform/README.md is done and TERRAFORM_ROLE_ARN is set as a
+    # repo variable - so this doesn't show as a broken/red check on every
+    # PR before then.
+    if: github.event_name == 'pull_request' && vars.TERRAFORM_ROLE_ARN != ''
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -59,7 +63,7 @@ jobs:
       - run: terraform plan -input=false -no-color
 
   apply:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.TERRAFORM_ROLE_ARN != ''
     runs-on: ubuntu-latest
     environment: production
     permissions:
