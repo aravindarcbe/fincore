@@ -45,10 +45,11 @@ export default function PF() {
           value={money(data.current_balance)}
           sub={`as of ${dateStr(data.as_of)}`}
           tone="good"
+          icon="piggy"
         />
-        <StatCard label="Monthly employee contribution" value={money(data.profile.monthly_employee_contribution)} />
-        <StatCard label="Monthly employer contribution" value={money(data.profile.monthly_employer_contribution)} />
-        <StatCard label="Declared interest rate" value={`${data.profile.interest_rate_annual}%`} />
+        <StatCard label="Monthly employee contribution" value={money(data.profile.monthly_employee_contribution)} icon="wallet" />
+        <StatCard label="Monthly employer contribution" value={money(data.profile.monthly_employer_contribution)} icon="wallet" />
+        <StatCard label="Declared interest rate" value={`${data.profile.interest_rate_annual}%`} icon="trendUp" />
       </div>
       <p className="muted" style={{ marginTop: -12 }}>
         Projection = latest passbook balance + {data.months_projected} month(s) of contributions since, plus an estimated

@@ -39,9 +39,9 @@ export default function CreditCards() {
       </div>
 
       <div className="stats-grid">
-        <StatCard label="Total outstanding" value={money(totalOutstanding)} tone={totalOutstanding > 0 ? 'danger' : 'good'} />
-        <StatCard label="Total credit limit" value={money(totalLimit)} />
-        <StatCard label="Available credit" value={money(totalLimit - totalOutstanding)} tone="good" />
+        <StatCard label="Total outstanding" value={money(totalOutstanding)} tone={totalOutstanding > 0 ? 'danger' : 'good'} icon="card" />
+        <StatCard label="Total credit limit" value={money(totalLimit)} icon="card" />
+        <StatCard label="Available credit" value={money(totalLimit - totalOutstanding)} tone="good" icon="card" />
       </div>
 
       <div className="panel">

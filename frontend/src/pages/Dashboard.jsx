@@ -28,52 +28,63 @@ export default function Dashboard() {
           value={money(data.total_loan_principal_outstanding)}
           sub={`${data.active_loans_count} active loan(s)`}
           tone={data.total_loan_principal_outstanding > 0 ? 'danger' : 'good'}
+          icon="loan"
         />
         <StatCard
           label="EMI due this month"
           value={money(data.total_emi_due_this_month)}
+          icon="loan"
         />
         <StatCard
           label="EMI paid this month"
           value={money(data.emi_paid_this_month)}
           sub={`${money(data.emi_due_this_month)} still due, ${money(data.emi_upcoming_this_month)} upcoming`}
           tone="good"
+          icon="check"
         />
         <StatCard
           label="Total remaining to pay (all loans)"
           value={money(data.total_loan_pending_amount)}
+          icon="loan"
         />
         <StatCard
           label="Current monthly salary (gross)"
           value={money(data.current_salary?.gross_amount)}
           sub={data.current_salary ? `since ${dateStr(data.current_salary.effective_date)}` : 'no salary entry yet'}
+          icon="wallet"
         />
         <StatCard
           label="Salary credited this month?"
           value={data.salary_credited ? 'Yes' : 'Not yet'}
           sub={`1st Tuesday: ${dateStr(data.salary_credit_date)}`}
           tone={data.salary_credited ? 'good' : 'danger'}
+          icon="calendar"
         />
         <StatCard
           label="Remaining salary this month"
           value={data.remaining_salary_this_month === null ? '—' : money(data.remaining_salary_this_month)}
           sub="salary minus EMIs marked paid"
+          icon="wallet"
         />
-        <StatCard label="PF balance (projected)" value={money(data.pf_current_balance)} tone="good" />
+        <StatCard label="PF balance (projected)" value={money(data.pf_current_balance)} tone="good" icon="piggy" />
         <StatCard
           label="Insurance premium / year"
           value={money(data.total_insurance_premium_annualized)}
           sub={`${data.insurance_due_this_month.length} due this month`}
+          icon="shield"
         />
         <StatCard
           label="Credit card outstanding"
           value={money(data.total_credit_card_outstanding)}
           sub={`of ${money(data.total_credit_limit)} limit`}
           tone={data.total_credit_card_outstanding > 0 ? 'danger' : 'good'}
+          icon="card"
         />
         <StatCard
           label="Available credit"
           value={money(netWorthGap)}
+          tone="good"
+          icon="card"
         />
       </div>
 
