@@ -9,6 +9,7 @@ correct, never to be saved unmodified.
 """
 
 import re
+from collections import Counter
 from datetime import date, datetime
 from io import BytesIO
 
@@ -98,8 +99,87 @@ def _find_years(text: str, keywords: list[str]) -> int | None:
     return None
 
 
-def parse_loan(text: str) -> dict:
+LENDER_SUFFIX_RE = re.compile(
+    r"\b(LTD\.?|LIMITED|LLP|BANK|FINANCE|FINANCIAL|FINCORP|FINCO|HFC|NBFC|CORP\.?|"
+    r"CO-OPERATIVE|COOPERATIVE|HOUSING)\b",
+    re.IGNORECASE,
+)
+
+# A repayment-schedule table row, e.g.
+# "1 03/09/2025 509205 16044.0 8264.0 7780.0 500941"
+# (Instl No, Due Date, Opening Principal, Inst. Amt., Principal, Interest, Closing Principal)
+SCHEDULE_ROW_RE = re.compile(
+    r"^\s*(\d{1,4})\s+(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})\s+"
+    r"([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s+"
+    r"([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s*$",
+    re.MULTILINE,
+)
+
+
+def _find_lender_fallback(text: str) -> str | None:
+    """Sanction letters label the lender explicitly; a bare repayment schedule
+    usually doesn't, but names the company on one of its first few lines."""
+    for line in text.splitlines()[:8]:
+        line = line.strip()
+        if line and len(line) <= 60 and LENDER_SUFFIX_RE.search(line) and not re.search(r"\d{4,}", line):
+            return line
+    return None
+
+
+def _parse_amortization_schedule(text: str) -> dict:
+    """Derive loan fields from a month-by-month repayment/amortization table,
+    for documents that show the schedule instead of labelling the terms."""
+    rows = []
+    for m in SCHEDULE_ROW_RE.finditer(text):
+        try:
+            rows.append(
+                {
+                    "num": int(m.group(1)),
+                    "due_date": dateparser.parse(m.group(2), dayfirst=True).date(),
+                    "opening": float(m.group(3).replace(",", "")),
+                    "inst_amt": float(m.group(4).replace(",", "")),
+                    "interest": float(m.group(6).replace(",", "")),
+                }
+            )
+        except (ValueError, OverflowError):
+            continue
+
+    if len(rows) < 2:
+        return {}
+
+    rows.sort(key=lambda r: r["num"])
+    first = rows[0]
+    emi_amount = Counter(r["inst_amt"] for r in rows).most_common(1)[0][0]
+    interest_rate = round(first["interest"] / first["opening"] * 12 * 100, 2) if first["opening"] else None
+
     return {
+        "principal_amount": first["opening"],
+        "start_date": first["due_date"],
+        "tenure_months": rows[-1]["num"],
+        "emi_amount": emi_amount,
+        "interest_rate": interest_rate,
+    }
+
+
+def _suggest_loan_name(lender: str | None, text: str) -> str:
+    low = text.lower()
+    if "personal loan" in low:
+        kind = "Personal Loan"
+    elif "home loan" in low or "housing loan" in low:
+        kind = "Home Loan"
+    elif "car loan" in low or "auto loan" in low or "vehicle loan" in low:
+        kind = "Car Loan"
+    elif "education loan" in low or "student loan" in low:
+        kind = "Education Loan"
+    elif "gold loan" in low:
+        kind = "Gold Loan"
+    else:
+        kind = "Loan"
+    return f"{kind} - {lender}" if lender else kind
+
+
+def parse_loan(text: str) -> dict:
+    fields = {
         "lender": _find_text(text, [r"Lender", r"Bank Name", r"Financial Institution", r"Issuing Bank"]),
         "principal_amount": _find_amount(
             text, [r"Loan Amount", r"Sanctioned Amount", r"Principal Amount", r"Sanction Amount"]
@@ -115,6 +195,23 @@ def parse_loan(text: str) -> dict:
             text, [r"First EMI Date", r"EMI Start Date", r"Repayment Start Date", r"Disbursement Date"]
         ),
     }
+
+    # Documents that print a month-by-month repayment schedule instead of (or
+    # in addition to) labelled terms - fill in whatever the keyword search above missed.
+    for key, value in _parse_amortization_schedule(text).items():
+        if not fields.get(key):
+            fields[key] = value
+
+    if not fields.get("lender"):
+        fields["lender"] = _find_lender_fallback(text)
+
+    fields["name"] = _suggest_loan_name(fields.get("lender"), text)
+
+    account_match = re.search(r"Loan\s*Account\s*No[:\.]?\s*([A-Za-z0-9\-/]+)", text, re.IGNORECASE)
+    if account_match:
+        fields["notes"] = f"Loan Account No: {account_match.group(1)}"
+
+    return fields
 
 
 def parse_insurance(text: str) -> dict:

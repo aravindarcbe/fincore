@@ -6,8 +6,6 @@ import AutoFillUpload from '../components/AutoFillUpload.jsx'
 
 const LOAN_TYPES = ['personal', 'home', 'car', 'education', 'gold', 'other']
 
-const EMI_DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
-
 function ordinal(n) {
   const s = ['th', 'st', 'nd', 'rd']
   const v = n % 100
@@ -23,7 +21,6 @@ const emptyForm = {
   tenure_months: '',
   emi_amount: '',
   start_date: '',
-  emi_day: '',
   notes: '',
 }
 
@@ -240,7 +237,6 @@ function LoanFormModal({ loan, onClose, onSaved }) {
           tenure_months: loan.tenure_months,
           emi_amount: loan.emi_amount ?? '',
           start_date: loan.start_date,
-          emi_day: loan.emi_day ?? '',
           notes: loan.notes,
           closed: loan.closed,
         },
@@ -264,7 +260,6 @@ function LoanFormModal({ loan, onClose, onSaved }) {
         interest_rate: Number(form.interest_rate || 0),
         tenure_months: Number(form.tenure_months),
         emi_amount: form.emi_amount === '' ? null : Number(form.emi_amount),
-        emi_day: form.emi_day === '' ? null : Number(form.emi_day),
       }
       if (isNew) {
         await api.loans.create(payload, file)
@@ -290,12 +285,14 @@ function LoanFormModal({ loan, onClose, onSaved }) {
               onExtracted={(extracted) =>
                 setForm((f) => ({
                   ...f,
+                  name: f.name || extracted.name || f.name,
                   lender: f.lender || extracted.lender || f.lender,
                   principal_amount: f.principal_amount || extracted.principal_amount || f.principal_amount,
                   interest_rate: f.interest_rate || extracted.interest_rate || f.interest_rate,
                   tenure_months: f.tenure_months || extracted.tenure_months || f.tenure_months,
                   emi_amount: f.emi_amount || extracted.emi_amount || f.emi_amount,
                   start_date: f.start_date || extracted.start_date || f.start_date,
+                  notes: f.notes || extracted.notes || f.notes,
                 }))
               }
               renderDuplicate={(d) =>
@@ -337,20 +334,12 @@ function LoanFormModal({ loan, onClose, onSaved }) {
             <label>EMI amount (leave blank to auto-calculate)</label>
             <input type="number" step="0.01" value={form.emi_amount} onChange={(e) => set('emi_amount', e.target.value)} />
           </div>
-          <div>
+          <div className="full">
             <label>First EMI date *</label>
             <input required type="date" value={form.start_date} onChange={(e) => set('start_date', e.target.value)} />
-          </div>
-          <div>
-            <label>EMI due day of month</label>
-            <select value={form.emi_day} onChange={(e) => set('emi_day', e.target.value)}>
-              <option value="">Same as first EMI date</option>
-              {EMI_DAYS.map((d) => (
-                <option key={d} value={d}>
-                  {ordinal(d)} of every month
-                </option>
-              ))}
-            </select>
+            <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
+              The EMI is due on this same date every month (e.g. 5th, 20th, whatever day this date falls on).
+            </p>
           </div>
           <div className="full">
             <label>Notes</label>
