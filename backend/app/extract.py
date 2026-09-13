@@ -150,7 +150,16 @@ def _parse_amortization_schedule(text: str) -> dict:
     rows.sort(key=lambda r: r["num"])
     first = rows[0]
     emi_amount = Counter(r["inst_amt"] for r in rows).most_common(1)[0][0]
-    interest_rate = round(first["interest"] / first["opening"] * 12 * 100, 2) if first["opening"] else None
+
+    # The first installment usually covers a broken/stub period (the gap
+    # between disbursement and the first due date is rarely exactly 30
+    # days), so annualizing its interest by a flat x12 gives a distorted
+    # rate. Later installments cover regular full periods, so prefer one
+    # of those when available.
+    rate_row = rows[1] if len(rows) > 1 else first
+    interest_rate = (
+        round(rate_row["interest"] / rate_row["opening"] * 12 * 100, 2) if rate_row["opening"] else None
+    )
 
     return {
         "principal_amount": first["opening"],
