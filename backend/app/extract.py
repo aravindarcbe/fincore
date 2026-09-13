@@ -12,6 +12,7 @@ import re
 from collections import Counter
 from datetime import date, datetime
 from io import BytesIO
+from statistics import median
 
 from dateutil import parser as dateparser
 from pypdf import PdfReader
@@ -105,13 +106,18 @@ LENDER_SUFFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
-# A repayment-schedule table row, e.g.
-# "1 03/09/2025 509205 16044.0 8264.0 7780.0 500941"
-# (Instl No, Due Date, Opening Principal, Inst. Amt., Principal, Interest, Closing Principal)
+# A repayment-schedule table row. Lenders lay these out differently - some
+# end the row with a closing-balance column, others with a "rate / days"
+# column instead - so only the four columns every layout has in common
+# (Instl No, Due Date, Opening Balance, Instalment, Principal, Interest) are
+# captured; whatever follows (closing balance, effective rate/days, etc.)
+# is ignored.
+# e.g. "1 03/09/2025 509205 16044.0 8264.0 7780.0 500941"
+#   or "1 05-Dec-2025 4,10,699.00 15,898.00 6,190.00 9,708.00 23.00 / 37"
 SCHEDULE_ROW_RE = re.compile(
-    r"^\s*(\d{1,4})\s+(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})\s+"
+    r"^\s*(\d{1,4})\s+(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}|\d{1,2}[/\-][A-Za-z]{3,9}[/\-]\d{2,4})\s+"
     r"([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s+"
-    r"([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s*$",
+    r"([\d,]+(?:\.\d+)?)(?:\s+.*)?$",
     re.MULTILINE,
 )
 
@@ -132,17 +138,35 @@ def _parse_amortization_schedule(text: str) -> dict:
     rows = []
     for m in SCHEDULE_ROW_RE.finditer(text):
         try:
-            rows.append(
-                {
-                    "num": int(m.group(1)),
-                    "due_date": dateparser.parse(m.group(2), dayfirst=True).date(),
-                    "opening": float(m.group(3).replace(",", "")),
-                    "inst_amt": float(m.group(4).replace(",", "")),
-                    "interest": float(m.group(6).replace(",", "")),
-                }
-            )
+            num = int(m.group(1))
+            due_date = dateparser.parse(m.group(2), dayfirst=True).date()
+            opening = float(m.group(3).replace(",", ""))
+            inst_amt = float(m.group(4).replace(",", ""))
+            principal = float(m.group(5).replace(",", ""))
+            interest = float(m.group(6).replace(",", ""))
         except (ValueError, OverflowError):
             continue
+
+        # Reject lines that only coincidentally look like a schedule row
+        # (page headers, unrelated figures): a real installment's principal
+        # and interest must reconcile with its amount, and can't exceed the
+        # opening balance it's drawn down from.
+        if opening <= 0 or inst_amt <= 0:
+            continue
+        if abs((principal + interest) - inst_amt) > max(inst_amt * 0.02, 5):
+            continue
+        if principal > opening + 1:
+            continue
+
+        rows.append(
+            {
+                "num": num,
+                "due_date": due_date,
+                "opening": opening,
+                "inst_amt": inst_amt,
+                "interest": interest,
+            }
+        )
 
     if len(rows) < 2:
         return {}
@@ -153,13 +177,14 @@ def _parse_amortization_schedule(text: str) -> dict:
 
     # The first installment usually covers a broken/stub period (the gap
     # between disbursement and the first due date is rarely exactly 30
-    # days), so annualizing its interest by a flat x12 gives a distorted
-    # rate. Later installments cover regular full periods, so prefer one
-    # of those when available.
-    rate_row = rows[1] if len(rows) > 1 else first
-    interest_rate = (
-        round(rate_row["interest"] / rate_row["opening"] * 12 * 100, 2) if rate_row["opening"] else None
-    )
+    # days) and the last can carry a rounding adjustment, so annualizing
+    # either one's interest by a flat x12 gives a distorted rate. Take the
+    # median across the regular installments in between - robust to any
+    # single odd row - and fall back to whatever's available for very
+    # short schedules.
+    reference_rows = rows[1:-1] if len(rows) > 2 else rows[1:]
+    rates = [r["interest"] / r["opening"] * 12 * 100 for r in reference_rows if r["opening"]]
+    interest_rate = round(median(rates), 2) if rates else None
 
     return {
         "principal_amount": first["opening"],
@@ -189,19 +214,84 @@ def _suggest_loan_name(lender: str | None, text: str) -> str:
 
 def parse_loan(text: str) -> dict:
     fields = {
-        "lender": _find_text(text, [r"Lender", r"Bank Name", r"Financial Institution", r"Issuing Bank"]),
+        "lender": _find_text(
+            text,
+            [
+                r"Lender(?:'?s)? Name",
+                r"Lender",
+                r"Bank Name",
+                r"NBFC Name",
+                r"Financier",
+                r"Financial Institution(?: Name)?",
+                r"Issuing Bank",
+                r"Name of (?:the )?Lender",
+            ],
+        ),
         "principal_amount": _find_amount(
-            text, [r"Loan Amount", r"Sanctioned Amount", r"Principal Amount", r"Sanction Amount"]
+            text,
+            [
+                r"Loan Amount",
+                r"Sanctioned Amount",
+                r"Loan Sanctioned Amount",
+                r"Principal Amount",
+                r"Sanction Amount",
+                r"Net Loan Amount",
+                r"Disbursed Amount",
+                r"Amount Disbursed",
+                r"Amount Financed",
+                r"Facility Amount",
+            ],
         ),
         "interest_rate": _find_percent(
-            text, [r"Rate of Interest", r"Interest Rate", r"ROI", r"Applicable Interest Rate"]
+            text,
+            [
+                r"Rate of Interest(?: \(% ?p\.?a\.?\))?",
+                r"Interest Rate(?: \(% ?p\.?a\.?\))?",
+                r"ROI",
+                r"Applicable Interest Rate",
+                r"Annual(?:ised)? Interest Rate",
+                r"Nominal Interest Rate",
+                r"Annual Percentage Rate",
+                r"\bAPR\b",
+            ],
         ),
-        "tenure_months": _find_months(text, [r"Tenure", r"Loan Tenure", r"Repayment Period", r"Loan Period"]),
+        "tenure_months": _find_months(
+            text,
+            [
+                r"Tenure",
+                r"Loan Tenure",
+                r"Loan Term",
+                r"Repayment Period",
+                r"Repayment Tenure",
+                r"Loan Period",
+                r"No\.? of Installments?",
+                r"Number of (?:EMIs|Installments?)",
+            ],
+        ),
         "emi_amount": _find_amount(
-            text, [r"EMI Amount", r"Equated Monthly Installment", r"Monthly Installment", r"\bEMI\b"]
+            text,
+            [
+                r"EMI Amount",
+                r"Equated Monthly Installment",
+                r"Monthly Installment",
+                r"Instal?ment Amount",
+                r"Monthly EMI",
+                r"Repayment Amount",
+                r"\bEMI\b",
+            ],
         ),
         "start_date": _find_date(
-            text, [r"First EMI Date", r"EMI Start Date", r"Repayment Start Date", r"Disbursement Date"]
+            text,
+            [
+                r"First EMI Date",
+                r"First Instal?ment Date",
+                r"First Due Date",
+                r"EMI Start Date",
+                r"Repayment Start Date",
+                r"Repayment Commencement Date",
+                r"Disbursement Date",
+                r"Value Date",
+            ],
         ),
     }
 
@@ -248,26 +338,81 @@ def parse_insurance(text: str) -> dict:
         policy_type = None
 
     return {
-        "policy_name": _find_text(text, [r"Plan Name", r"Product Name", r"Policy Name"]),
+        "policy_name": _find_text(text, [r"Plan Name", r"Product Name", r"Policy Name", r"Scheme Name"]),
         "policy_type": policy_type,
-        "insurer": _find_text(text, [r"Insurer", r"Insurance Company", r"Company Name"]),
-        "policy_number": _find_text(text, [r"Policy Number", r"Policy No\.?"]),
-        "sum_assured": _find_amount(text, [r"Sum Assured", r"Sum Insured", r"Cover Amount", r"Basic Sum Assured"]),
+        "insurer": _find_text(
+            text,
+            [
+                r"Insurer",
+                r"Insurance Company",
+                r"Company Name",
+                r"Name of (?:the )?Insurer",
+                r"Life Insurance Company",
+                r"General Insurance Company",
+            ],
+        ),
+        "policy_number": _find_text(
+            text, [r"Policy Number", r"Policy No\.?", r"Certificate No\.?", r"Proposal No\.?"]
+        ),
+        "sum_assured": _find_amount(
+            text,
+            [
+                r"Sum Assured",
+                r"Sum Insured",
+                r"Cover Amount",
+                r"Basic Sum Assured",
+                r"Total Sum Assured",
+                r"Basic Sum Insured",
+            ],
+        ),
         "premium_amount": _find_amount(
-            text, [r"Premium Amount", r"Installment Premium", r"Total Premium", r"\bPremium\b"]
+            text,
+            [
+                r"Premium Amount",
+                r"Installment Premium",
+                r"Instal?ment Premium",
+                r"Total Premium",
+                r"Premium Payable",
+                r"Modal Premium",
+                r"\bPremium\b",
+            ],
         ),
         "premium_frequency": frequency,
-        "start_date": _find_date(text, [r"Policy Start Date", r"Commencement Date", r"Risk Start Date", r"Date of Commencement"]),
-        "term_years": _find_years(text, [r"Policy Term", r"Term"]),
+        "start_date": _find_date(
+            text,
+            [
+                r"Policy Start Date",
+                r"Commencement Date",
+                r"Risk Start Date",
+                r"Date of Commencement",
+                r"Policy Issue Date",
+                r"Date of Issue",
+            ],
+        ),
+        "term_years": _find_years(text, [r"Policy Term", r"Premium Payment Term", r"Term"]),
         "maturity_benefit": _find_amount(text, [r"Maturity Benefit", r"Sum Assured on Maturity", r"Maturity Sum Assured"]),
     }
 
 
 def parse_salary(text: str) -> dict:
     return {
-        "effective_date": _find_date(text, [r"Pay Period", r"Salary Month", r"For the Month of", r"Payslip for"]),
-        "gross_amount": _find_amount(text, [r"Gross Salary", r"Gross Pay", r"Total Earnings", r"Gross Earnings"]),
-        "net_amount": _find_amount(text, [r"Net Pay", r"Net Salary", r"Take Home", r"Net Amount Payable"]),
+        "effective_date": _find_date(
+            text,
+            [
+                r"Pay Period",
+                r"Salary Month",
+                r"Month of Salary",
+                r"For the Month of",
+                r"Payslip for",
+                r"Salary Slip for",
+            ],
+        ),
+        "gross_amount": _find_amount(
+            text, [r"Gross Salary", r"Gross Pay", r"Total Earnings", r"Gross Earnings", r"Total Gross Earnings"]
+        ),
+        "net_amount": _find_amount(
+            text, [r"Net Pay", r"Net Salary", r"Take Home", r"Net Amount Payable", r"Net Salary Payable"]
+        ),
         "employee_pf_contribution": _find_amount(
             text, [r"Employee PF", r"PF \(Employee\)", r"PF Employee Contribution", r"Provident Fund \(Employee\)"]
         ),
