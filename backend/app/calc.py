@@ -4,7 +4,7 @@ All of these are computed on the fly from user-entered inputs (principal, rate,
 tenure, start date, etc.) rather than stored, so they always reflect "as of today".
 """
 
-from datetime import date
+from datetime import date, timedelta
 import calendar
 
 FREQ_MONTHS = {
@@ -83,6 +83,44 @@ def loan_derived(loan, as_of: date | None = None) -> dict:
         "last_emi_date": last_emi_date,
         "total_interest": round(total_interest, 2),
         "status": status,
+    }
+
+
+def first_tuesday(year: int, month: int) -> date:
+    """Salary credit date: the first Tuesday of the given month."""
+    d = date(year, month, 1)
+    offset = (1 - d.weekday()) % 7  # Monday=0 ... Tuesday=1
+    return d + timedelta(days=offset)
+
+
+def loan_current_period_status(loan, as_of: date | None = None) -> dict:
+    """This-month EMI status for a loan: paid (green), due (red, needs
+    confirmation because the due day has passed), upcoming, or not_applicable
+    (loan hasn't started yet, or has already finished / been closed)."""
+    as_of = as_of or date.today()
+    period = f"{as_of.year:04d}-{as_of.month:02d}"
+
+    days_in_month = calendar.monthrange(as_of.year, as_of.month)[1]
+    due_day = min(loan.emi_day or loan.start_date.day, days_in_month)
+    due_date = date(as_of.year, as_of.month, due_day)
+
+    last_emi_date = add_months(loan.start_date, loan.tenure_months - 1)
+    payment = next((p for p in (loan.emi_payments or []) if p.period == period), None)
+
+    if loan.closed or as_of < loan.start_date or as_of > last_emi_date:
+        period_status = "not_applicable"
+    elif payment and payment.paid:
+        period_status = "paid"
+    elif as_of > due_date:
+        period_status = "due"
+    else:
+        period_status = "upcoming"
+
+    return {
+        "current_period": period,
+        "current_period_due_date": due_date,
+        "current_period_status": period_status,
+        "current_period_paid_date": payment.paid_date if (payment and payment.paid) else None,
     }
 
 

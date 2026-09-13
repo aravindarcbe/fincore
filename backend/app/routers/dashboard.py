@@ -32,6 +32,19 @@ def get_dashboard(db: Session = Depends(get_db)):
         key=lambda l: l.last_emi_date,
     )
 
+    emi_paid_this_month = round(
+        sum(l.computed_emi for l in loans if l.current_period_status == "paid"), 2
+    )
+    emi_due_this_month = round(
+        sum(l.computed_emi for l in loans if l.current_period_status == "due"), 2
+    )
+    emi_upcoming_this_month = round(
+        sum(l.computed_emi for l in loans if l.current_period_status == "upcoming"), 2
+    )
+
+    salary_credit_date = calc.first_tuesday(today.year, today.month)
+    salary_credited = today >= salary_credit_date
+
     current_salary_row = (
         db.query(models.SalaryEntry)
         .filter(models.SalaryEntry.effective_date <= today)
@@ -60,6 +73,13 @@ def get_dashboard(db: Session = Depends(get_db)):
     total_credit_card_outstanding = round(sum(c.outstanding_amount for c in cards), 2)
     total_credit_limit = round(sum(c.credit_limit for c in cards), 2)
 
+    remaining_salary_this_month = None
+    salary_amount = None
+    if current_salary_row:
+        salary_amount = current_salary_row.net_amount or current_salary_row.gross_amount
+    if salary_amount is not None and salary_credited:
+        remaining_salary_this_month = round(salary_amount - emi_paid_this_month, 2)
+
     return schemas.DashboardOut(
         total_loan_principal_outstanding=total_loan_principal_outstanding,
         total_emi_due_this_month=total_emi_due_this_month,
@@ -72,4 +92,10 @@ def get_dashboard(db: Session = Depends(get_db)):
         total_insurance_premium_annualized=total_insurance_premium_annualized,
         total_credit_card_outstanding=total_credit_card_outstanding,
         total_credit_limit=total_credit_limit,
+        salary_credit_date=salary_credit_date,
+        salary_credited=salary_credited,
+        emi_paid_this_month=emi_paid_this_month,
+        emi_due_this_month=emi_due_this_month,
+        emi_upcoming_this_month=emi_upcoming_this_month,
+        remaining_salary_this_month=remaining_salary_this_month,
     )

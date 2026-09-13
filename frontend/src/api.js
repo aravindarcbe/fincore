@@ -46,6 +46,7 @@ export const api = {
     update: (id, fields) => json('PUT', `/loans/${id}`, fields),
     remove: (id) => json('DELETE', `/loans/${id}`),
     attachDocument: (id, file) => form('POST', `/loans/${id}/document`, {}, file),
+    setEmiPayment: (id, fields) => json('PUT', `/loans/${id}/emi-payment`, fields),
   },
 
   salary: {

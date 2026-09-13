@@ -6,6 +6,14 @@ import AutoFillUpload from '../components/AutoFillUpload.jsx'
 
 const LOAN_TYPES = ['personal', 'home', 'car', 'education', 'gold', 'other']
 
+const EMI_DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
+
+function ordinal(n) {
+  const s = ['th', 'st', 'nd', 'rd']
+  const v = n % 100
+  return n + (s[(v - 20) % 10] || s[v] || s[0])
+}
+
 const emptyForm = {
   name: '',
   lender: '',
@@ -15,6 +23,7 @@ const emptyForm = {
   tenure_months: '',
   emi_amount: '',
   start_date: '',
+  emi_day: '',
   notes: '',
 }
 
@@ -38,6 +47,11 @@ export default function Loans() {
 
   async function handleAttach(id, file) {
     await api.loans.attachDocument(id, file)
+    load()
+  }
+
+  async function handleMarkPaid(id, paid) {
+    await api.loans.setEmiPayment(id, { paid })
     load()
   }
 
@@ -84,10 +98,12 @@ export default function Loans() {
                 <th>Principal</th>
                 <th>Rate</th>
                 <th>EMI</th>
+                <th>EMI due day</th>
                 <th>Pending</th>
                 <th>Balance principal</th>
                 <th>Balance to pay</th>
                 <th>Last EMI</th>
+                <th>This month</th>
                 <th>Status</th>
                 <th>Doc</th>
                 <th></th>
@@ -104,10 +120,14 @@ export default function Loans() {
                   <td>{money(l.principal_amount)}</td>
                   <td>{l.interest_rate}%</td>
                   <td>{money(l.computed_emi)}</td>
+                  <td className="muted">{ordinal(l.emi_day || new Date(l.start_date).getDate())}</td>
                   <td>{l.pending_months} mo</td>
                   <td>{money(l.balance_principal)}</td>
                   <td>{money(l.balance_amount_to_pay)}</td>
                   <td>{dateStr(l.last_emi_date)}</td>
+                  <td>
+                    <ThisMonthCell loan={l} onMark={handleMarkPaid} />
+                  </td>
                   <td>
                     <span className={`badge badge-${l.status === 'active' ? 'active' : 'closed'}`}>
                       {l.status}
@@ -160,6 +180,52 @@ export default function Loans() {
   )
 }
 
+function ThisMonthCell({ loan, onMark }) {
+  const status = loan.current_period_status
+
+  if (status === 'not_applicable') return <span className="muted">—</span>
+
+  if (status === 'paid') {
+    return (
+      <div>
+        <span className="badge badge-paid">Paid</span>
+        <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+          {dateStr(loan.current_period_paid_date)}{' '}
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => onMark(loan.id, false)}
+            title="Undo — mark as not paid"
+          >
+            undo
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === 'due') {
+    return (
+      <div>
+        <span className="badge badge-due">Due</span>
+        <div style={{ marginTop: 4 }}>
+          <button type="button" className="btn btn-small" onClick={() => onMark(loan.id, true)}>
+            Mark as paid
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // upcoming
+  return (
+    <div>
+      <span className="badge badge-upcoming">Upcoming</span>
+      <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>due {dateStr(loan.current_period_due_date)}</div>
+    </div>
+  )
+}
+
 function LoanFormModal({ loan, onClose, onSaved }) {
   const isNew = loan.id === undefined
   const [form, setForm] = useState(
@@ -174,6 +240,7 @@ function LoanFormModal({ loan, onClose, onSaved }) {
           tenure_months: loan.tenure_months,
           emi_amount: loan.emi_amount ?? '',
           start_date: loan.start_date,
+          emi_day: loan.emi_day ?? '',
           notes: loan.notes,
           closed: loan.closed,
         },
@@ -197,6 +264,7 @@ function LoanFormModal({ loan, onClose, onSaved }) {
         interest_rate: Number(form.interest_rate || 0),
         tenure_months: Number(form.tenure_months),
         emi_amount: form.emi_amount === '' ? null : Number(form.emi_amount),
+        emi_day: form.emi_day === '' ? null : Number(form.emi_day),
       }
       if (isNew) {
         await api.loans.create(payload, file)
@@ -269,9 +337,20 @@ function LoanFormModal({ loan, onClose, onSaved }) {
             <label>EMI amount (leave blank to auto-calculate)</label>
             <input type="number" step="0.01" value={form.emi_amount} onChange={(e) => set('emi_amount', e.target.value)} />
           </div>
-          <div className="full">
+          <div>
             <label>First EMI date *</label>
             <input required type="date" value={form.start_date} onChange={(e) => set('start_date', e.target.value)} />
+          </div>
+          <div>
+            <label>EMI due day of month</label>
+            <select value={form.emi_day} onChange={(e) => set('emi_day', e.target.value)}>
+              <option value="">Same as first EMI date</option>
+              {EMI_DAYS.map((d) => (
+                <option key={d} value={d}>
+                  {ordinal(d)} of every month
+                </option>
+              ))}
+            </select>
           </div>
           <div className="full">
             <label>Notes</label>

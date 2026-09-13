@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -27,11 +28,34 @@ class Loan(Base):
     tenure_months = Column(Integer, nullable=False)
     emi_amount = Column(Float, nullable=True)  # if null, computed
     start_date = Column(Date, nullable=False)  # first EMI date
+    emi_day = Column(Integer, nullable=True)  # day of month EMI is due (1-31); defaults to start_date's day
     document_path = Column(String, nullable=True)
     notes = Column(Text, default="")
     closed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    emi_payments = relationship(
+        "LoanEmiPayment", back_populates="loan", cascade="all, delete-orphan"
+    )
+
+
+class LoanEmiPayment(Base):
+    """Tracks, per calendar month, whether a loan's EMI was confirmed paid."""
+
+    __tablename__ = "loan_emi_payments"
+    __table_args__ = (UniqueConstraint("loan_id", "period", name="uq_loan_emi_period"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    loan_id = Column(Integer, ForeignKey("loans.id"), nullable=False)
+    period = Column(String, nullable=False)  # "YYYY-MM"
+    paid = Column(Boolean, default=True)
+    paid_date = Column(Date, nullable=True)
+    amount = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    loan = relationship("Loan", back_populates="emi_payments")
 
 
 class SalaryEntry(Base):

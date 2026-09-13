@@ -13,6 +13,7 @@ router = APIRouter(prefix="/api/loans", tags=["loans"])
 
 def _to_out(loan: models.Loan) -> schemas.LoanOut:
     derived = calc.loan_derived(loan)
+    period_status = calc.loan_current_period_status(loan)
     return schemas.LoanOut(
         id=loan.id,
         name=loan.name,
@@ -23,11 +24,13 @@ def _to_out(loan: models.Loan) -> schemas.LoanOut:
         tenure_months=loan.tenure_months,
         emi_amount=loan.emi_amount,
         start_date=loan.start_date,
+        emi_day=loan.emi_day,
         notes=loan.notes,
         closed=loan.closed,
         document_path=loan.document_path,
         created_at=loan.created_at,
         **derived,
+        **period_status,
     )
 
 
@@ -55,6 +58,7 @@ async def create_loan(
     tenure_months: int = Form(...),
     emi_amount: Optional[float] = Form(None),
     start_date: date = Form(...),
+    emi_day: Optional[int] = Form(None),
     notes: str = Form(""),
     document: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
@@ -69,6 +73,7 @@ async def create_loan(
         tenure_months=tenure_months,
         emi_amount=emi_amount,
         start_date=start_date,
+        emi_day=emi_day,
         notes=notes,
         document_path=stored_name,
     )
@@ -85,6 +90,38 @@ def update_loan(loan_id: int, payload: schemas.LoanUpdate, db: Session = Depends
         raise HTTPException(404, "Loan not found")
     for field, value in payload.model_dump().items():
         setattr(loan, field, value)
+    db.commit()
+    db.refresh(loan)
+    return _to_out(loan)
+
+
+@router.put("/{loan_id}/emi-payment", response_model=schemas.LoanOut)
+def set_emi_payment(loan_id: int, payload: schemas.LoanEmiPaymentIn, db: Session = Depends(get_db)):
+    loan = db.get(models.Loan, loan_id)
+    if not loan:
+        raise HTTPException(404, "Loan not found")
+
+    today = date.today()
+    period = payload.period or f"{today.year:04d}-{today.month:02d}"
+
+    record = (
+        db.query(models.LoanEmiPayment)
+        .filter(models.LoanEmiPayment.loan_id == loan_id, models.LoanEmiPayment.period == period)
+        .first()
+    )
+
+    if payload.paid:
+        if not record:
+            record = models.LoanEmiPayment(loan_id=loan_id, period=period)
+            db.add(record)
+        record.paid = True
+        record.paid_date = payload.paid_date or today
+        record.amount = loan.emi_amount or calc.compute_emi(
+            loan.principal_amount, loan.interest_rate, loan.tenure_months
+        )
+    elif record:
+        db.delete(record)
+
     db.commit()
     db.refresh(loan)
     return _to_out(loan)
