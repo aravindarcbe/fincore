@@ -34,6 +34,12 @@ export default function Dashboard() {
           value={money(data.total_emi_due_this_month)}
         />
         <StatCard
+          label="EMI paid this month"
+          value={money(data.emi_paid_this_month)}
+          sub={`${money(data.emi_due_this_month)} still due, ${money(data.emi_upcoming_this_month)} upcoming`}
+          tone="good"
+        />
+        <StatCard
           label="Total remaining to pay (all loans)"
           value={money(data.total_loan_pending_amount)}
         />
@@ -41,6 +47,17 @@ export default function Dashboard() {
           label="Current monthly salary (gross)"
           value={money(data.current_salary?.gross_amount)}
           sub={data.current_salary ? `since ${dateStr(data.current_salary.effective_date)}` : 'no salary entry yet'}
+        />
+        <StatCard
+          label="Salary credited this month?"
+          value={data.salary_credited ? 'Yes' : 'Not yet'}
+          sub={`1st Tuesday: ${dateStr(data.salary_credit_date)}`}
+          tone={data.salary_credited ? 'good' : 'danger'}
+        />
+        <StatCard
+          label="Remaining salary this month"
+          value={data.remaining_salary_this_month === null ? '—' : money(data.remaining_salary_this_month)}
+          sub="salary minus EMIs marked paid"
         />
         <StatCard label="PF balance (projected)" value={money(data.pf_current_balance)} tone="good" />
         <StatCard

@@ -13,6 +13,7 @@ class LoanBase(BaseModel):
     tenure_months: int
     emi_amount: Optional[float] = None
     start_date: date
+    emi_day: Optional[int] = None  # day of month EMI is due (1-31); defaults to start_date's day
     notes: str = ""
     closed: bool = False
 
@@ -39,6 +40,17 @@ class LoanOut(LoanBase):
     last_emi_date: Optional[date] = None
     total_interest: float = 0
     status: str = "active"
+    # this-month EMI status: paid (green) / due (red) / upcoming / not_applicable
+    current_period: str = ""
+    current_period_due_date: Optional[date] = None
+    current_period_status: str = "not_applicable"
+    current_period_paid_date: Optional[date] = None
+
+
+class LoanEmiPaymentIn(BaseModel):
+    period: Optional[str] = None  # "YYYY-MM"; defaults to current month
+    paid: bool = True
+    paid_date: Optional[date] = None
 
 
 # ---------- Salary ----------
@@ -184,3 +196,10 @@ class DashboardOut(BaseModel):
     total_insurance_premium_annualized: float
     total_credit_card_outstanding: float
     total_credit_limit: float
+    # this-month EMI / salary cash-flow
+    salary_credit_date: date
+    salary_credited: bool
+    emi_paid_this_month: float
+    emi_due_this_month: float
+    emi_upcoming_this_month: float
+    remaining_salary_this_month: Optional[float] = None
