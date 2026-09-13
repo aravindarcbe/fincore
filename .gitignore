@@ -8,3 +8,12 @@ backend/data/uploads/*
 !backend/data/uploads/.gitkeep
 *.log
 .DS_Store
+
+# Terraform - state and vars can contain IPs/account details, never commit them
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
+infra/terraform/terraform.tfstate
+infra/terraform/terraform.tfstate.backup
+infra/terraform/*.tfvars
+infra/terraform/*.tfplan
+infra/terraform/crash.log

@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Bootstraps a fresh Ubuntu box into a running FinCore server. Runs once on
+# first boot (cloud-init). Safe to re-run by hand (ssh in and run
+# /opt/fincore/deploy.sh) since every step here is idempotent.
+set -euo pipefail
+exec > >(tee -a /var/log/fincore-bootstrap.log) 2>&1
+
+echo "=== FinCore bootstrap starting $(date) ==="
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get upgrade -y
+apt-get install -y nginx python3-venv python3-pip git curl certbot python3-certbot-nginx
+
+# Node.js 20.x (NodeSource) - Ubuntu's own repo version is usually too old to
+# build a current Vite app.
+if ! command -v node >/dev/null 2>&1; then
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  apt-get install -y nodejs
+fi
+
+APP_DIR=/opt/fincore
+REPO_URL="${github_repo_url}"
+BRANCH="${git_branch}"
+
+if [ ! -d "$APP_DIR/.git" ]; then
+  git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+fi
+
+cat > "$APP_DIR/deploy.sh" <<'DEPLOY_EOF'
+#!/usr/bin/env bash
+# Redeploys the app from the current git_branch: pulls latest code, updates
+# backend deps, rebuilds the frontend, restarts services. Run by GitHub
+# Actions on every push to main, or by hand: sudo /opt/fincore/deploy.sh
+set -euo pipefail
+APP_DIR=/opt/fincore
+cd "$APP_DIR"
+
+git fetch origin
+git reset --hard "origin/$(git rev-parse --abbrev-ref HEAD)"
+
+cd "$APP_DIR/backend"
+python3 -m venv venv --upgrade-deps 2>/dev/null || python3 -m venv venv
+./venv/bin/pip install --upgrade pip --quiet
+./venv/bin/pip install -r requirements.txt --quiet
+
+cd "$APP_DIR/frontend"
+npm install --no-audit --no-fund
+npm run build
+
+systemctl restart fincore-backend
+systemctl reload nginx
+echo "Deployed $(git -C "$APP_DIR" rev-parse --short HEAD) at $(date)"
+DEPLOY_EOF
+chmod +x "$APP_DIR/deploy.sh"
+
+python3 -m venv "$APP_DIR/backend/venv" --upgrade-deps 2>/dev/null || python3 -m venv "$APP_DIR/backend/venv"
+"$APP_DIR/backend/venv/bin/pip" install --upgrade pip --quiet
+"$APP_DIR/backend/venv/bin/pip" install -r "$APP_DIR/backend/requirements.txt" --quiet
+
+cd "$APP_DIR/frontend"
+npm install --no-audit --no-fund
+npm run build
+
+id -u fincore >/dev/null 2>&1 || useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin fincore
+chown -R fincore:fincore "$APP_DIR"
+
+cat > /etc/systemd/system/fincore-backend.service <<UNIT_EOF
+[Unit]
+Description=FinCore FastAPI backend
+After=network.target
+
+[Service]
+Type=simple
+User=fincore
+Group=fincore
+WorkingDirectory=$APP_DIR/backend
+ExecStart=$APP_DIR/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+cat > /etc/nginx/sites-available/fincore <<NGINX_EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain_name} www.${domain_name};
+
+    root $APP_DIR/frontend/dist;
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location / {
+        try_files \$uri /index.html;
+    }
+}
+NGINX_EOF
+
+ln -sf /etc/nginx/sites-available/fincore /etc/nginx/sites-enabled/fincore
+rm -f /etc/nginx/sites-enabled/default
+
+systemctl daemon-reload
+systemctl enable fincore-backend
+systemctl restart fincore-backend
+nginx -t
+systemctl restart nginx
+
+echo "=== FinCore bootstrap finished $(date) ==="
+echo "HTTPS is NOT set up yet - point your domain's DNS at this server's IP,"
+echo "then run: sudo certbot --nginx -d ${domain_name} -d www.${domain_name}"
