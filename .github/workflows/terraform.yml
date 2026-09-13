@@ -11,7 +11,9 @@
 # infra/terraform-bootstrap's `terraform output backend_hcl`).
 #
 # The very first apply that creates TERRAFORM_ROLE_ARN itself has to run
-# locally (see README) - this workflow only takes over after that.
+# locally (see README) - this workflow only takes over after that. Until
+# then, every run still executes and prints a clear warning annotation
+# naming exactly what's missing, rather than silently skipping.
 name: Terraform
 
 on:
@@ -35,11 +37,7 @@ env:
 
 jobs:
   plan:
-    # Skips cleanly (instead of failing) until the one-time AWS bootstrap in
-    # infra/terraform/README.md is done and TERRAFORM_ROLE_ARN is set as a
-    # repo variable - so this doesn't show as a broken/red check on every
-    # PR before then.
-    if: github.event_name == 'pull_request' && vars.TERRAFORM_ROLE_ARN != ''
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -47,23 +45,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check AWS bootstrap is done
+        id: check
+        run: |
+          if [ -z "${{ vars.TERRAFORM_ROLE_ARN }}" ]; then
+            echo "::warning title=Terraform CI not configured yet::TERRAFORM_ROLE_ARN repo variable is not set, so this run can't authenticate to AWS. Run the one-time local bootstrap in infra/terraform/README.md, then add the GitHub Actions repo variables it prints (Settings > Secrets and variables > Actions > Variables). Skipping the plan for now - this is expected until that's done."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Write backend.hcl
+        if: steps.check.outputs.ready == 'true'
         run: printf '%s\n' "${{ vars.TF_BACKEND_HCL }}" > backend.hcl
 
       - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.check.outputs.ready == 'true'
         with:
           role-to-assume: ${{ vars.TERRAFORM_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - uses: hashicorp/setup-terraform@v3
+        if: steps.check.outputs.ready == 'true'
         with:
           terraform_version: "1.9.8"
 
       - run: terraform init -input=false -backend-config=backend.hcl
+        if: steps.check.outputs.ready == 'true'
       - run: terraform plan -input=false -no-color
+        if: steps.check.outputs.ready == 'true'
 
   apply:
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.TERRAFORM_ROLE_ARN != ''
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -72,17 +85,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check AWS bootstrap is done
+        id: check
+        run: |
+          if [ -z "${{ vars.TERRAFORM_ROLE_ARN }}" ]; then
+            echo "::warning title=Terraform CI not configured yet::TERRAFORM_ROLE_ARN repo variable is not set, so this run can't authenticate to AWS. Run the one-time local bootstrap in infra/terraform/README.md, then add the GitHub Actions repo variables it prints (Settings > Secrets and variables > Actions > Variables). Skipping the apply for now - this is expected until that's done."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Write backend.hcl
+        if: steps.check.outputs.ready == 'true'
         run: printf '%s\n' "${{ vars.TF_BACKEND_HCL }}" > backend.hcl
 
       - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.check.outputs.ready == 'true'
         with:
           role-to-assume: ${{ vars.TERRAFORM_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - uses: hashicorp/setup-terraform@v3
+        if: steps.check.outputs.ready == 'true'
         with:
           terraform_version: "1.9.8"
 
       - run: terraform init -input=false -backend-config=backend.hcl
+        if: steps.check.outputs.ready == 'true'
       - run: terraform apply -input=false -auto-approve
+        if: steps.check.outputs.ready == 'true'

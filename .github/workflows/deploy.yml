@@ -26,21 +26,28 @@ permissions:
 
 jobs:
   deploy:
-    # Skips cleanly (instead of failing) until the AWS bootstrap in
-    # infra/terraform/README.md is done and DEPLOY_ROLE_ARN is set as a
-    # repo variable - so merging infra changes doesn't immediately produce
-    # a broken/red "Deploy to production" run on main.
-    if: vars.DEPLOY_ROLE_ARN != ''
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Check AWS bootstrap is done
+        id: check
+        run: |
+          if [ -z "${{ vars.DEPLOY_ROLE_ARN }}" ]; then
+            echo "::warning title=Deploy CI not configured yet::DEPLOY_ROLE_ARN repo variable is not set, so this run can't authenticate to AWS. Run the one-time local Terraform bootstrap in infra/terraform/README.md, then add the GitHub Actions repo variables it prints (Settings > Secrets and variables > Actions > Variables): AWS_REGION, EC2_INSTANCE_ID, DEPLOY_ROLE_ARN. Skipping this deploy for now - this is expected until that's done."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Configure AWS credentials (OIDC, no stored keys)
+        if: steps.check.outputs.ready == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Deploy via SSM Run Command
+        if: steps.check.outputs.ready == 'true'
         run: |
           set -euo pipefail
 
