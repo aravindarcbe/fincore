@@ -17,3 +17,8 @@ infra/terraform/terraform.tfstate.backup
 infra/terraform/*.tfvars
 infra/terraform/*.tfplan
 infra/terraform/crash.log
+infra/terraform/backend.hcl
+infra/terraform-bootstrap/.terraform/
+infra/terraform-bootstrap/.terraform.lock.hcl
+infra/terraform-bootstrap/terraform.tfstate
+infra/terraform-bootstrap/terraform.tfstate.backup

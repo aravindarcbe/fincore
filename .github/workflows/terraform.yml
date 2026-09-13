@@ -1,0 +1,84 @@
+# Infrastructure-as-code CI/CD for infra/terraform: plans on pull requests
+# that touch it, applies automatically on push to main. Also runnable
+# on-demand (workflow_dispatch) if infra ever needs re-applying without a
+# code change (e.g. after an out-of-band console edit).
+#
+# Uses OIDC for AWS auth (see infra/terraform/oidc.tf) - no stored AWS keys.
+# Needs these GitHub Actions repo *variables* (not secrets - see
+# infra/terraform/README.md): AWS_REGION, TERRAFORM_ROLE_ARN,
+# SSH_PUBLIC_KEY, ALLOWED_SSH_CIDR, LETSENCRYPT_EMAIL, and TF_BACKEND_HCL
+# (the contents of infra/terraform/backend.hcl - see
+# infra/terraform-bootstrap's `terraform output backend_hcl`).
+#
+# The very first apply that creates TERRAFORM_ROLE_ARN itself has to run
+# locally (see README) - this workflow only takes over after that.
+name: Terraform
+
+on:
+  pull_request:
+    paths: ["infra/terraform/**"]
+  push:
+    branches: [main]
+    paths: ["infra/terraform/**"]
+  workflow_dispatch: {}
+
+defaults:
+  run:
+    working-directory: infra/terraform
+
+env:
+  TF_VAR_ssh_public_key: ${{ vars.SSH_PUBLIC_KEY }}
+  TF_VAR_allowed_ssh_cidr: ${{ vars.ALLOWED_SSH_CIDR }}
+  TF_VAR_letsencrypt_email: ${{ vars.LETSENCRYPT_EMAIL }}
+  TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write backend.hcl
+        run: printf '%s\n' "${{ vars.TF_BACKEND_HCL }}" > backend.hcl
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - run: terraform init -input=false -backend-config=backend.hcl
+      - run: terraform plan -input=false -no-color
+
+  apply:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write backend.hcl
+        run: printf '%s\n' "${{ vars.TF_BACKEND_HCL }}" > backend.hcl
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - run: terraform init -input=false -backend-config=backend.hcl
+      - run: terraform apply -input=false -auto-approve

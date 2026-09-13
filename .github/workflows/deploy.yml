@@ -1,16 +1,14 @@
 # Continuous deployment: every push to main redeploys the app onto the
-# EC2 server provisioned by infra/terraform. Requires three repo secrets
-# (Settings -> Secrets and variables -> Actions -> New repository secret),
-# set up by you - never shared with anyone else:
+# EC2 server provisioned by infra/terraform. Uses OIDC to get short-lived
+# AWS credentials (no stored AWS keys) and AWS Systems Manager Run Command
+# to execute the deploy script (no SSH key needed either, and no need to
+# open port 22 to GitHub's ever-changing runner IPs).
 #
-#   EC2_HOST     the server's public IP (terraform output: server_public_ip)
-#   EC2_USER     "ubuntu"
-#   EC2_SSH_KEY  the PRIVATE half of the key pair you gave Terraform
-#                (contents of e.g. ~/.ssh/fincore_ed25519 - not the .pub file)
-#
-# The workflow only ever uses the private key inside this run's ephemeral
-# GitHub-hosted runner; it's discarded when the job ends and never touches
-# the repo or a commit.
+# Needs 3 GitHub Actions repo/environment *variables* (Settings -> Secrets
+# and variables -> Actions -> Variables tab - not Secrets, none of this is
+# sensitive): AWS_REGION, EC2_INSTANCE_ID, DEPLOY_ROLE_ARN. All three are
+# printed by `terraform output` after you provision the server - see
+# infra/terraform/README.md and the root DEPLOYMENT.md.
 name: Deploy to production
 
 on:
@@ -22,22 +20,59 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Deploy over SSH
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+      - name: Configure AWS credentials (OIDC, no stored keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Deploy via SSM Run Command
         run: |
           set -euo pipefail
-          mkdir -p ~/.ssh
-          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
-            "$EC2_USER@$EC2_HOST" 'sudo /opt/fincore/deploy.sh'
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${{ vars.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["/opt/fincore/deploy.sh"]' \
+            --comment "GitHub Actions deploy ${GITHUB_SHA::12}" \
+            --query "Command.CommandId" --output text)
+          echo "SSM command: $COMMAND_ID"
+
+          for i in $(seq 1 30); do
+            sleep 10
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "${{ vars.EC2_INSTANCE_ID }}" \
+              --query "Status" --output text 2>/dev/null || echo "Pending")
+            echo "status: $STATUS"
+            if [ "$STATUS" = "Success" ]; then
+              aws ssm get-command-invocation \
+                --command-id "$COMMAND_ID" --instance-id "${{ vars.EC2_INSTANCE_ID }}" \
+                --query "StandardOutputContent" --output text
+              exit 0
+            fi
+            case "$STATUS" in
+              Failed | Cancelled | TimedOut | Undeliverable)
+                echo "--- stdout ---"
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" --instance-id "${{ vars.EC2_INSTANCE_ID }}" \
+                  --query "StandardOutputContent" --output text || true
+                echo "--- stderr ---"
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" --instance-id "${{ vars.EC2_INSTANCE_ID }}" \
+                  --query "StandardErrorContent" --output text || true
+                exit 1
+                ;;
+            esac
+          done
+          echo "Timed out waiting for the deploy command to finish"
+          exit 1

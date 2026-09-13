@@ -15,7 +15,36 @@ data "aws_ami" "ubuntu" {
 
 resource "aws_key_pair" "fincore" {
   key_name   = "fincore-server"
-  public_key = file(var.ssh_public_key_path)
+  public_key = var.ssh_public_key
+}
+
+# Lets AWS Systems Manager reach the instance to run the deploy script,
+# instead of GitHub Actions needing SSH access (GitHub-hosted runners don't
+# have a fixed IP, so they couldn't get through allowed_ssh_cidr anyway).
+# SSH stays open only to your own IP, for your own manual access/debugging.
+data "aws_iam_policy_document" "ec2_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "fincore_instance" {
+  name               = "fincore-instance"
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "fincore_instance_ssm" {
+  role       = aws_iam_role.fincore_instance.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "fincore_instance" {
+  name = "fincore-instance"
+  role = aws_iam_role.fincore_instance.name
 }
 
 resource "aws_instance" "fincore" {
@@ -24,6 +53,7 @@ resource "aws_instance" "fincore" {
   subnet_id              = data.aws_subnets.default.ids[0]
   key_name               = aws_key_pair.fincore.key_name
   vpc_security_group_ids = [aws_security_group.fincore_web.id]
+  iam_instance_profile   = aws_iam_instance_profile.fincore_instance.name
 
   root_block_device {
     volume_size = var.root_volume_size_gb

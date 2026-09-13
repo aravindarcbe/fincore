@@ -1,64 +1,82 @@
 # Deploying FinCore to production (aravindarcbe.com)
 
 Two parts:
-1. **Infrastructure** (Terraform, one-time, run manually by you) - provisions
-   the AWS server. See [`infra/terraform/README.md`](infra/terraform/README.md)
-   for the full step-by-step.
-2. **App deployment** (GitHub Actions, automatic) - every push to `main`
-   redeploys the latest code onto that server. Set up once below.
+1. **Infrastructure** (Terraform) - provisions the AWS server. The very
+   first apply runs locally, by you; after that, GitHub Actions applies
+   further infra changes automatically. See
+   [`infra/terraform/README.md`](infra/terraform/README.md) for the full
+   step-by-step, and [`infra/terraform-bootstrap/README.md`](infra/terraform-bootstrap/README.md)
+   for the tiny one-time state-bucket setup that comes first.
+2. **App deployment** (GitHub Actions) - every push to `main` redeploys the
+   latest code onto that server automatically.
 
-Nobody but you ever handles your AWS keys or SSH private key - you run
-Terraform yourself locally, and you're the one who pastes the GitHub
-secrets in step 2 below (Claude/this repo never sees them).
+Nobody but you ever handles your AWS keys or SSH private key. The first
+Terraform apply uses your own local AWS CLI credentials; everything after
+that uses OIDC (AWS and GitHub trust each other directly - no stored keys
+anywhere) and AWS Systems Manager instead of SSH for deploys. You're the
+one who pastes a handful of **non-secret** GitHub Actions *variables* once
+(step below) - Claude/this repo never sees or needs them.
 
 ## Git workflow
 
 `main` is production. Merging a PR into `main` (or pushing to it directly)
-triggers [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
-which SSHes into the server and runs its `deploy.sh` (git pull, rebuild
-frontend, restart the backend service). Feature branches and PRs don't
-deploy anything on their own - only `main` does.
+triggers two independent things, each only if relevant files changed:
+
+- [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) - any app
+  code change → SSM-deploys onto the server (git pull, rebuild frontend,
+  restart the backend service).
+- [`.github/workflows/terraform.yml`](.github/workflows/terraform.yml) -
+  any change under `infra/terraform/` → applies it. Pull requests touching
+  that path get a `terraform plan` posted to the Actions log first.
+
+Feature branches and PRs don't deploy or apply anything on their own -
+only `main` does.
 
 Recommended flow:
 ```
 git checkout -b my-change
 # ... work, commit ...
 git push -u origin my-change
-# open a PR into main, review, merge
-# -> main updates -> deploy.yml runs automatically -> aravindarcbe.com updates
+# open a PR into main, review (check the terraform plan if infra changed), merge
+# -> main updates -> the relevant workflow(s) run automatically
 ```
 
-## One-time setup: connect GitHub Actions to your server
+## One-time setup: connect GitHub Actions to AWS
 
-After you've run `terraform apply` (see the infra README) and have a
-`server_public_ip`:
+After you've run the **first** `terraform apply` locally (see the infra
+README) and have its `next_steps` output in front of you:
 
 1. On GitHub: repo → **Settings** → **Environments** → **New environment**
-   → name it `production`. (Optional but recommended: under this
-   environment, add yourself as a **required reviewer** so every deploy
-   needs a manual click-to-approve before it runs - a nice safety net for a
-   personal-finance app.)
+   → name it `production`. (Optional but recommended: add yourself as a
+   **required reviewer** so every deploy/infra-apply needs a manual
+   click-to-approve - a nice safety net for a personal-finance app.)
 
-2. Still under that `production` environment (or under **Settings** →
-   **Secrets and variables** → **Actions** if you skipped step 1's
-   environment), add three secrets:
+2. Repo → **Settings** → **Secrets and variables** → **Actions** →
+   **Variables** tab (not Secrets - nothing here is sensitive) → add:
 
-   | Secret | Value |
+   | Variable | Value |
    |---|---|
-   | `EC2_HOST` | the `server_public_ip` Terraform printed |
-   | `EC2_USER` | `ubuntu` |
-   | `EC2_SSH_KEY` | the contents of your **private** key file (e.g. `cat ~/.ssh/fincore_ed25519`) - the one whose `.pub` half you gave Terraform |
+   | `AWS_REGION` | e.g. `ap-south-1` |
+   | `EC2_INSTANCE_ID` | from `terraform output instance_id` |
+   | `DEPLOY_ROLE_ARN` | from `terraform output github_actions_deploy_role_arn` |
+   | `TERRAFORM_ROLE_ARN` | from `terraform output github_actions_terraform_role_arn` |
+   | `SSH_PUBLIC_KEY` | the same value you set `ssh_public_key` to |
+   | `ALLOWED_SSH_CIDR` | the same value you set `allowed_ssh_cidr` to |
+   | `LETSENCRYPT_EMAIL` | the same value you set `letsencrypt_email` to |
+   | `TF_BACKEND_HCL` | contents of `infra/terraform/backend.hcl` |
 
-3. Push (or merge a PR) to `main`. Check the **Actions** tab - you should
-   see "Deploy to production" run and finish green. Visit
+3. Push (or merge a PR) to `main`. Check the **Actions** tab - "Deploy to
+   production" should run and finish green. Visit
    `https://aravindarcbe.com` to confirm.
 
-You can also trigger a deploy manually anytime from the Actions tab
-("Deploy to production" → **Run workflow**) without needing a new commit.
+You can also trigger either workflow manually anytime from the Actions tab
+(**Run workflow**) without needing a new commit.
 
-## What doesn't auto-deploy
+## What this buys you
 
-Changes to the Terraform files under `infra/terraform/` are **not** applied
-automatically - infrastructure changes are rare and risky enough that you
-should run `terraform plan` / `terraform apply` yourself and read the diff
-before applying. See the infra README for that flow.
+No AWS access keys and no SSH private key live in GitHub at all - OIDC
+issues short-lived tokens per run, and deploys go over AWS Systems Manager
+instead of SSH. The only things stored in GitHub are non-secret
+identifiers (region, instance ID, role ARNs, your public key, your IP,
+your email) - if any of them leaked, none grant access to anything on
+their own.

@@ -12,6 +12,16 @@ apt-get update -y
 apt-get upgrade -y
 apt-get install -y nginx python3-venv python3-pip git curl certbot python3-certbot-nginx
 
+# GitHub Actions deploys run over SSM (not SSH), since GitHub-hosted
+# runners don't have a fixed IP to allow through the security group.
+# Canonical's Ubuntu AMIs ship the agent as a snap, usually already
+# running - this just makes sure.
+if ! systemctl is-active --quiet snap.amazon-ssm-agent.amazon-ssm-agent.service 2>/dev/null; then
+  snap install amazon-ssm-agent --classic || true
+  systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service || true
+  systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service || true
+fi
+
 # Node.js 20.x (NodeSource) - Ubuntu's own repo version is usually too old to
 # build a current Vite app.
 if ! command -v node >/dev/null 2>&1; then

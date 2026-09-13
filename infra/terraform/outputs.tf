@@ -3,8 +3,23 @@ output "server_public_ip" {
   value       = aws_eip.fincore.public_ip
 }
 
+output "instance_id" {
+  description = "Set this as the EC2_INSTANCE_ID GitHub Actions variable."
+  value       = aws_instance.fincore.id
+}
+
+output "github_actions_terraform_role_arn" {
+  description = "Set this as the TERRAFORM_ROLE_ARN GitHub Actions variable."
+  value       = aws_iam_role.github_actions_terraform.arn
+}
+
+output "github_actions_deploy_role_arn" {
+  description = "Set this as the DEPLOY_ROLE_ARN GitHub Actions variable."
+  value       = aws_iam_role.github_actions_deploy.arn
+}
+
 output "ssh_command" {
-  description = "Command to SSH into the server (uses the private half of the key you pointed ssh_public_key_path at)."
+  description = "Command for YOUR OWN manual SSH access (not used by CI - that goes over SSM instead)."
   value       = "ssh ubuntu@${aws_eip.fincore.public_ip}"
 }
 
@@ -22,5 +37,17 @@ output "next_steps" {
        ssh ubuntu@${aws_eip.fincore.public_ip}
        sudo certbot --nginx -d ${var.domain_name} -d www.${var.domain_name} -m ${var.letsencrypt_email} --agree-tos --redirect -n
     4. Visit https://${var.domain_name}
+    5. In GitHub repo Settings -> Secrets and variables -> Actions -> Variables tab,
+       add (all safe as plain "Variables", nothing here is a secret):
+         AWS_REGION        = ${var.aws_region}
+         EC2_INSTANCE_ID   = ${aws_instance.fincore.id}
+         TERRAFORM_ROLE_ARN = ${aws_iam_role.github_actions_terraform.arn}
+         DEPLOY_ROLE_ARN   = ${aws_iam_role.github_actions_deploy.arn}
+         SSH_PUBLIC_KEY    = (the same value you set ssh_public_key to)
+         ALLOWED_SSH_CIDR  = (the same value you set allowed_ssh_cidr to)
+         LETSENCRYPT_EMAIL = ${var.letsencrypt_email}
+         TF_BACKEND_HCL    = (contents of infra/terraform/backend.hcl - see infra/terraform-bootstrap's `terraform output backend_hcl`)
+       After that, every push to main both redeploys the app AND applies any
+       infra/terraform changes automatically - no more local terraform/aws commands needed.
   EOT
 }

@@ -37,8 +37,15 @@ variable "root_volume_size_gb" {
   default     = 20
 }
 
-variable "ssh_public_key_path" {
-  description = "Path to YOUR OWN local SSH public key file (e.g. ~/.ssh/id_ed25519.pub), generated on your machine. Never your private key - Terraform only ever needs the public half."
+variable "ssh_public_key" {
+  description = <<-EOT
+    The CONTENTS of your own SSH public key (e.g. `cat ~/.ssh/fincore_ed25519.pub`) -
+    never the private key. Passed as a value (not a file path) so the same
+    variable works whether you run Terraform locally or from GitHub Actions
+    (a file path wouldn't exist on a GitHub-hosted runner). This is safe to
+    store as a plain GitHub Actions *variable* (not secret) - public keys
+    aren't sensitive.
+  EOT
   type        = string
 }
 
@@ -62,4 +69,16 @@ variable "git_branch" {
 variable "letsencrypt_email" {
   description = "Email used for Let's Encrypt certificate expiry notices (used manually with certbot after DNS is live - see README)."
   type        = string
+}
+
+variable "github_owner" {
+  description = "GitHub username/org that owns the repo - used to scope the GitHub Actions OIDC trust so only your repo can assume the deploy/terraform roles."
+  type        = string
+  default     = "aravindarcbe"
+}
+
+variable "github_repo_name" {
+  description = "Repo name - used the same way as github_owner."
+  type        = string
+  default     = "fincore"
 }

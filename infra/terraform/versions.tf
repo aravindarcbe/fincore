@@ -6,12 +6,21 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 
-  # Local state by default - fine for a single-person project run from one
-  # machine. If more than one person/machine will run terraform, switch this
-  # to an S3 backend instead so state isn't only on one laptop.
-  # backend "s3" {}
+  # Shared state in S3 so both your local machine and GitHub Actions see the
+  # same infrastructure. The bucket comes from infra/terraform-bootstrap
+  # (applied once, separately - see that module's README). Partial config:
+  # run `terraform init -backend-config=backend.hcl` (see backend.hcl.example).
+  #
+  # No DynamoDB lock table - see README.md's "State locking" note for why
+  # that's an acceptable tradeoff here, and what to do instead if two
+  # applies ever run at the same time.
+  backend "s3" {}
 }
 
 provider "aws" {
