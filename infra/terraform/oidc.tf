@@ -28,10 +28,14 @@ resource "aws_iam_openid_connect_provider" "github_actions" {
 }
 
 locals {
-  # Matches any branch/PR/tag in your repo. Fine for a single-collaborator
-  # personal project; tighten to "repo:OWNER/REPO:ref:refs/heads/main" if
-  # you want only main able to assume these roles.
-  github_repo_sub = "repo:${var.github_owner}/${var.github_repo_name}:*"
+  # GitHub's actual sub claim is "repo:OWNER@OWNER_ID/REPO@REPO_ID:..." (not
+  # the plain "repo:OWNER/REPO:..." most OIDC tutorials show) - confirmed by
+  # printing a real token's claims. The "@*" wildcards match those numeric
+  # IDs without hardcoding them. Matches any branch/PR/tag in your repo -
+  # fine for a single-collaborator personal project; tighten the trailing
+  # "*" to "ref:refs/heads/main" if you want only main able to assume these
+  # roles.
+  github_repo_sub = "repo:${var.github_owner}@*/${var.github_repo_name}@*:*"
 }
 
 data "aws_iam_policy_document" "github_oidc_trust" {

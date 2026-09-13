@@ -46,6 +46,11 @@ set -euo pipefail
 APP_DIR=/opt/fincore
 cd "$APP_DIR"
 
+# Deploys run as root (via SSM), but the repo is owned by the fincore
+# user - git refuses to operate across that ownership mismatch unless
+# explicitly told it's fine. Idempotent: --add is a no-op if already set.
+git config --global --add safe.directory "$APP_DIR"
+
 git fetch origin
 git reset --hard "origin/$(git rev-parse --abbrev-ref HEAD)"
 
